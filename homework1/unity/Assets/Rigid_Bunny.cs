@@ -5,9 +5,9 @@ using System;
 public class Rigid_Bunny : MonoBehaviour 
 {
 	bool launched 		= false;
-	float dt 			= 0.001f;
+	float dt 			= 0.015f;
 	Vector3 v 			= new Vector3(0, 0, 0);	// velocity
-	Vector3 w 			= new Vector3(0, 1, 0);	// angular velocity
+	Vector3 w 			= new Vector3(0, 0, 0);	// angular velocity
 	
 	float mass;									// mass
 	Matrix4x4 I_ref;							// reference inertia
@@ -104,20 +104,17 @@ public class Rigid_Bunny : MonoBehaviour
 	//P 为该平面上的一个点，N为该平面的法线
 	void Collision_Impulse(Vector3 P, Vector3 N)
 	{
-		Vector3 dv = new Vector3(0, 0, 0);
-		Vector3 dw = new Vector3(0, 0, 0);
-
 		//1.获取物体的每一个顶点(局部坐标)
 		Mesh mesh = GetComponent<MeshFilter>().mesh;
 		Vector3[] vertices = mesh.vertices;
 
 		//2.得到每一个顶点的全局坐标旋转矩阵R,和平移向量
-		Matrix4x4 R = Matrix4x4.Rotate(transform.rotation);
-		Vector3 T = transform.position;
-		Matrix4x4 I_rot = R * I_ref * Matrix4x4.Transpose(R);
-		Matrix4x4 I_inverse = Matrix4x4.Inverse(I_rot);
+		Matrix4x4 R = Matrix4x4.Rotate(transform.rotation);  //旋转矩阵
+		Vector3 T = transform.position;						 //平移向量
 
-		int num = 0;
+		Vector3 sum = new Vector3(0,0,0);					//碰撞点
+		int collisionNum = 0;								//碰撞点数量
+
 
 		for (int i = 0; i < vertices.Length; i++)
         {
@@ -129,37 +126,42 @@ public class Rigid_Bunny : MonoBehaviour
             if (d < 0.0f)//发生碰撞(只有当平面为无限大平面时才能这样判断，否则还要判断碰撞点是否在物体上)
             {
 				//4.将该点移动到距离表面最近的点。?????
-				//x_i -= d * N;
+				//x_i -= d * N
 				//5.判断物体是否仍向墙体内部运动
 				Vector3 v_i = v + Vector3.Cross(w, Rri);
 				float v_N_size = Vector3.Dot(v_i, N);
 				if (v_N_size < 0.0f)
                 {
-					//Debug.Log("改变速度");
-					num++;
-					//6.如果物体仍向墙体内部运动,修改为新速度
-					Vector3 v_N = v_N_size * N;
-					Vector3 v_T = v_i - v_N;
-					Vector3 v_N_new = -1.0f  *restitution * v_N;
-					float a = Math.Max(1.0f - friction * (1.0f + restitution)* v_N.magnitude/v_T.magnitude,0.0f);
-					Vector3 v_T_new = a * v_T;
-					Vector3 v_new = v_N_new + v_T_new;
-					//7.通过新速度量计算冲量J
-					Matrix4x4 Rri_star = Get_Cross_Matrix(Rri);
-					Matrix4x4 K = Matrix_subtraction(Matrix_miltiply_float(Matrix4x4.identity,1.0f/mass) ,
-													Rri_star * I_inverse * Rri_star);
-					Vector3 J = K.inverse.MultiplyVector(v_new - v_i);
-					//8.计算dv,dw;
-					dv += 1.0f / mass * J;
-					dw += I_inverse.MultiplyVector(Vector3.Cross(Rri, J));
-					//break;
-					Debug.LogFormat("共有{0}个点",num);
+					sum += r_i;
+					collisionNum++;
 				}
             }
         }
+		//Debug.LogFormat("共有{0}个点", collisionNum);
+
+		if (collisionNum == 0) return;
+		Matrix4x4 I_rot = R * I_ref * Matrix4x4.Transpose(R);//惯性张量（全局）
+		Matrix4x4 I_inverse = Matrix4x4.Inverse(I_rot);      //惯性张量的逆（全局）
+		Vector3 r_collision = sum / collisionNum;                //虚拟碰撞点（局部坐标）
+		Vector3 Rr_collision = R.MultiplyVector(r_collision);
+		//Vector3 x_collision = T + Rr_collision;							 //虚拟碰撞点（全局坐标）
+		Vector3 v_collision = v + Vector3.Cross(w, Rr_collision);
+		//6.如果物体仍向墙体内部运动,修改为新速度
+		Vector3 v_N = Vector3.Dot(v_collision, N) * N;
+		Vector3 v_T = v_collision - v_N;
+		Vector3 v_N_new = -1.0f * restitution * v_N;
+		float a = Math.Max(1.0f - friction * (1.0f + restitution) * v_N.magnitude / v_T.magnitude, 0.0f);
+		Vector3 v_T_new = a * v_T;
+		Vector3 v_new = v_N_new + v_T_new;
+		//7.通过新速度量计算冲量J
+		Matrix4x4 Rri_star = Get_Cross_Matrix(Rr_collision);
+		Matrix4x4 K = Matrix_subtraction(Matrix_miltiply_float(Matrix4x4.identity, 1.0f / mass),
+										Rri_star * I_inverse * Rri_star);
+		Vector3 J = K.inverse.MultiplyVector(v_new - v_collision);
+		//8.计算dv,dw;
+		v += 1.0f / mass * J;
+		w += I_inverse.MultiplyVector(Vector3.Cross(Rr_collision, J));
 		//9.通过冲量J改变整个物体的线速度和角速度
-		v += dv;
-		w += dw;
 	}
 
     // Update is called once per frame
@@ -176,7 +178,8 @@ public class Rigid_Bunny : MonoBehaviour
 		if(Input.GetKey("l"))
 		{
 			v = new Vector3 (5, 2, 0);
-			launched=true;
+			w = new Vector3 (0, 1, 0);   
+			launched =true;
 		}
 
 		if (launched)
